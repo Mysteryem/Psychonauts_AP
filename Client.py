@@ -4,7 +4,7 @@ import sys
 import asyncio
 import shutil
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Set
 
 import ModuleUpdate
 ModuleUpdate.update()
@@ -57,6 +57,7 @@ class PsychonautsContext(CommonContext):
     items_handling = 0b111  # full remote
 
     local_psy_location_to_local_psy_item_id: Dict[int, int]
+    local_psy_item_ids: Set[int]
 
     def __init__(self, server_address, password):
         super(PsychonautsContext, self).__init__(server_address, password)
@@ -69,6 +70,7 @@ class PsychonautsContext(CommonContext):
         self.psy_item_counts_received = {k: 0 for k in self.psy_item_counts.keys()}
         self.slot_data = {}
         self.local_psy_location_to_local_psy_item_id = {}
+        self.local_psy_item_ids = set()
 
         options = Utils.get_settings()
         root_directory = options["psychonauts_options"]["root_directory"]
@@ -110,6 +112,7 @@ class PsychonautsContext(CommonContext):
             self.slot_data = args.get("slot_data", {})
             # When int keys are stored in slot data, they are converted to str, so convert back to int.
             self.local_psy_location_to_local_psy_item_id = {int(k): v for k, v in self.slot_data["local_location_to_psy_id"].items()}
+            self.local_psy_item_ids = set(self.local_psy_location_to_local_psy_item_id.values())
             if not os.path.exists(self.game_communication_path):
                 os.makedirs(self.game_communication_path)
             # create ItemsCollected.txt if it doesn't exist yet
@@ -148,16 +151,31 @@ class PsychonautsContext(CommonContext):
                             with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
                                 f.write(f"{local_item_psy_id}\n")
                     else:
-                        # Total number of these items available to the game
+                        # Total number of these items available to the game.
                         item_count = self.psy_item_counts[converted_id]
+                        # Maximum Psychonauts ID for this item.
                         max_converted_id = converted_id + item_count - 1
                         # Total number of these items received by the game so far
                         item_count_received = self.psy_item_counts_received[converted_id]
+                        # For non-local received items, the Psychonauts ID is incremented for each copy of that received
+                        # so far, so that each item received produces a unique Psychonauts ID.
                         next_psy_id = converted_id + item_count_received
-                        if next_psy_id > max_converted_id:
-                            # Cannot send any more of this item because Psychonauts already has them all!
-                            print(f"Warning: Cannot send item with id '{next_psy_id}' and base id '{converted_id}'"
-                                  f" because Psychonauts has run out of that item! (max id '{max_converted_id}')")
+                        # Psychonauts has a limited number of IDs for each duplicate of an item, so check if it's
+                        # possible to send more of this item.
+                        if next_psy_id in self.local_psy_item_ids or next_psy_id > max_converted_id:
+                            # Locally placed Psychonauts items are placed starting from that item's maximum ID and
+                            # decrementing the ID for each item placed, so reaching the Psychonauts ID of a locally
+                            # placed item means that all copies of this item have been received or placed locally.
+                            # When forcefully sending an item via server console cheat command, items are sent and
+                            # collected from locations that exist first, so reaching the ID of a locally placed item
+                            # should only occur when all locations, including local locations, containing this item
+                            # have been exhausted.
+                            #
+                            # Alternatively, if there were no locally placed copies of the item, then Psychonauts will
+                            # only have run out of IDs for the item once the maximum ID for that item has been reached.
+                            print(f"Warning: Cannot send item '{network_item.item}' with Psychonauts ID '{next_psy_id}'"
+                                  f" and base Psychonauts ID '{converted_id}' because Psychonauts has run out of that"
+                                  f"item.")
                         else:
                             with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
                                 f.write(f"{next_psy_id}\n")
