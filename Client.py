@@ -4,11 +4,12 @@ import sys
 import asyncio
 import shutil
 import logging
-import typing
+from typing import Dict, Any
 
 import ModuleUpdate
 ModuleUpdate.update()
 import Utils
+from .Items import item_dictionary_table, item_counts
 
 logger = logging.getLogger("Client")
 
@@ -55,6 +56,8 @@ class PsychonautsContext(CommonContext):
     game = "Psychonauts"
     items_handling = 0b111  # full remote
 
+    local_psy_location_to_local_psy_item_id: Dict[int, int]
+
     def __init__(self, server_address, password):
         super(PsychonautsContext, self).__init__(server_address, password)
         self.send_index: int = 0
@@ -62,6 +65,10 @@ class PsychonautsContext(CommonContext):
         self.awaiting_bridge = False
         self.got_deathlink = False
         self.deathlink_status = False
+        self.psy_item_counts = {item_dictionary_table[item_name]: count for item_name, count in item_counts.items()}
+        self.psy_item_counts_received = {k: 0 for k in self.psy_item_counts.keys()}
+        self.slot_data = {}
+        self.local_psy_location_to_local_psy_item_id = {}
 
         options = Utils.get_settings()
         root_directory = options["psychonauts_options"]["root_directory"]
@@ -100,6 +107,9 @@ class PsychonautsContext(CommonContext):
 
     def on_package(self, cmd: str, args: dict):
         if cmd in {"Connected"}:
+            self.slot_data = args.get("slot_data", {})
+            # When int keys are stored in slot data, they are converted to str, so convert back to int.
+            self.local_psy_location_to_local_psy_item_id = {int(k): v for k, v in self.slot_data["local_location_to_psy_id"].items()}
             if not os.path.exists(self.game_communication_path):
                 os.makedirs(self.game_communication_path)
             # create ItemsCollected.txt if it doesn't exist yet
@@ -123,10 +133,36 @@ class PsychonautsContext(CommonContext):
             if start_index != len(self.items_received):
                 for item in args['items']:
                     # subtract base_id to get real value for game
-                    converted_id = NetworkItem(*item).item - 42690000
-                    with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
-                        f.write(f"{converted_id}\n")
-                        f.close()
+                    network_item = NetworkItem(*item)
+                    converted_id = network_item.item - 42690000
+                    # Check if the item was placed locally.
+                    if network_item.player == self.slot:
+                        # Locally placed items must write the exact Psychonauts item ID they were placed as.
+                        converted_location_id = network_item.location - 42690000
+                        if converted_location_id not in self.local_psy_location_to_local_psy_item_id:
+                            print(f"Error: Could not find {converted_location_id} in"
+                                  f" {self.local_psy_location_to_local_psy_item_id}")
+                        else:
+                            # Get the Psychonauts item id for the item at this location
+                            local_item_psy_id = self.local_psy_location_to_local_psy_item_id[converted_location_id]
+                            with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
+                                f.write(f"{local_item_psy_id}\n")
+                    else:
+                        # Total number of these items available to the game
+                        item_count = self.psy_item_counts[converted_id]
+                        max_converted_id = converted_id + item_count - 1
+                        # Total number of these items received by the game so far
+                        item_count_received = self.psy_item_counts_received[converted_id]
+                        next_psy_id = converted_id + item_count_received
+                        if next_psy_id > max_converted_id:
+                            # Cannot send any more of this item because Psychonauts already has them all!
+                            print(f"Warning: Cannot send item with id '{next_psy_id}' and base id '{converted_id}'"
+                                  f" because Psychonauts has run out of that item! (max id '{max_converted_id}')")
+                        else:
+                            with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
+                                f.write(f"{next_psy_id}\n")
+                            # Increment the received count for this item.
+                            self.psy_item_counts_received[converted_id] = item_count_received + 1
 
 
         if cmd in {"RoomUpdate"}:
@@ -150,7 +186,7 @@ class PsychonautsContext(CommonContext):
         self.ui = PsychonautsManager(self)
         self.ui_task = asyncio.create_task(self.ui.async_run(), name="UI")
 
-    def on_deathlink(self, data: typing.Dict[str, typing.Any]):
+    def on_deathlink(self, data: Dict[str, Any]):
         self.got_deathlink = True
         super().on_deathlink(data)
 

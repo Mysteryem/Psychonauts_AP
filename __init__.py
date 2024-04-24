@@ -6,6 +6,7 @@ from BaseClasses import Tutorial, ItemClassification
 from Fill import fill_restrictive
 from worlds.LauncherComponents import Component, components, Type, launch_subprocess
 from worlds.AutoWorld import World, WebWorld
+from BaseClasses import Item
 from .Items import *
 from .Locations import *
 from .Names import ItemName, LocationName, RegionName
@@ -13,7 +14,7 @@ from .Options import Goal, PsychonautsOptions, slot_data_options
 from .Regions import create_psyregions, connect_regions
 from .Rules import *
 from .Subclasses import PSYItem
-from .PsychoSeed import gen_psy_seed
+from .PsychoSeed import gen_psy_seed, gen_psy_ids, PSY_NON_LOCAL_ID_START
 
 def launch_client():
     from .Client import launch
@@ -128,7 +129,24 @@ class PSYWorld(World):
             self.adjusted_item_pool.pop(item)
             self.multiworld.push_precollected(self.create_item(item))
 
-        itempool = [self.create_item(item) for item in list(self.adjusted_item_pool.keys())[:364]]
+        itempool = []
+        # TODO: Mysteryem: What is the source of this magic number?
+        total_item_count = 364
+        created_item_count = 0
+        for item_name in self.adjusted_item_pool.keys():
+            item_count = item_counts[item_name]
+            remaining_items = total_item_count - created_item_count
+            number_to_create = min(item_count, remaining_items)
+
+            for _ in range(number_to_create):
+                itempool.append(self.create_item(item_name))
+            created_item_count += number_to_create
+
+            if number_to_create != item_count:
+                # No more items can be created.
+                break
+
+        assert len(itempool) == total_item_count
 
         self.multiworld.itempool += itempool
 
@@ -164,4 +182,12 @@ class PSYWorld(World):
         for name, value in self.options.as_dict(*self.options_dataclass.type_hints).items():
             if name in slot_data_options:
                 slot_data[name] = value
+
+        # TODO: Call gen_psy_ids earlier and store it on self, then pass it into the gen_psy_seed call in
+        #  self.generate_output(), that way gen_psy_ids is only called once, guaranteeing that both the psychorando
+        #  seed and the slot data contain the same ids.
+        location_to_psy_id = gen_psy_ids(self)
+        local_location_to_psy_id = {location_id: item_id for location_id, item_id in location_to_psy_id if item_id < PSY_NON_LOCAL_ID_START}
+        slot_data["local_location_to_psy_id"] = local_location_to_psy_id
+
         return slot_data
