@@ -138,6 +138,12 @@ class PsychonautsContext(CommonContext):
                     # subtract base_id to get real value for game
                     network_item = NetworkItem(*item)
                     converted_id = network_item.item - 42690000
+
+                    # Total number of these items available to the game.
+                    item_count = self.psy_item_counts[converted_id]
+                    # Maximum Psychonauts ID for this item when there are multiple copies.
+                    max_converted_id = converted_id + item_count - 1
+
                     # Check if the item was placed locally.
                     if network_item.player == self.slot:
                         # Locally placed items must write the exact Psychonauts item ID they were placed as.
@@ -148,13 +154,17 @@ class PsychonautsContext(CommonContext):
                         else:
                             # Get the Psychonauts item id for the item at this location
                             local_item_psy_id = self.local_psy_location_to_local_psy_item_id[converted_location_id]
-                            with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
-                                f.write(f"{local_item_psy_id}\n")
+                            # Check that the Psychonauts ID matches the item AP thinks is at this location.
+                            if converted_id <= local_item_psy_id <= max_converted_id:
+                                with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
+                                    f.write(f"{local_item_psy_id}\n")
+                            else:
+                                # This should not happen unless the slot data does not match the multiworld data.
+                                print(f"Error: The local item AP thinks is at {converted_location_id} has base ID"
+                                      f" '{converted_id}' and max ID '{max_converted_id}', but the actual local item"
+                                      f" according to slot data has ID '{local_item_psy_id}'")
+
                     else:
-                        # Total number of these items available to the game.
-                        item_count = self.psy_item_counts[converted_id]
-                        # Maximum Psychonauts ID for this item.
-                        max_converted_id = converted_id + item_count - 1
                         # Total number of these items received by the game so far
                         item_count_received = self.psy_item_counts_received[converted_id]
                         # For non-local received items, the Psychonauts ID is incremented for each copy of that received
