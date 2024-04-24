@@ -130,8 +130,9 @@ class PSYWorld(World):
             self.multiworld.push_precollected(self.create_item(item))
 
         itempool = []
-        # TODO: Mysteryem: What is the source of this magic number?
-        total_item_count = 364
+
+        # Fill the pool with as many items as there are local locations that can have items placed into.
+        total_item_count = FILLABLE_LOCATION_COUNT
         created_item_count = 0
         for item_name in self.adjusted_item_pool.keys():
             item_count = item_counts[item_name]

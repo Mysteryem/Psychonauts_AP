@@ -449,3 +449,6 @@ all_locations = {
 
 # Offset added to Psychonauts IDs to produce AP IDs.
 AP_LOCATION_OFFSET = 42690000
+
+# The event locations cannot have regular items placed in them, so are not included.
+FILLABLE_LOCATION_COUNT = len(all_locations) - len(event_locations)
