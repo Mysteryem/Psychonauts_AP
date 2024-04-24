@@ -9,7 +9,8 @@ from typing import Dict, Any, Set
 import ModuleUpdate
 ModuleUpdate.update()
 import Utils
-from .Items import item_dictionary_table, item_counts
+from .Items import item_dictionary_table, item_counts, AP_ITEM_OFFSET
+from .Locations import AP_LOCATION_OFFSET
 
 logger = logging.getLogger("Client")
 
@@ -56,8 +57,11 @@ class PsychonautsContext(CommonContext):
     game = "Psychonauts"
     items_handling = 0b111  # full remote
 
+    max_item_counts: Dict[int, int]
+    non_local_received_item_counts: Dict[int, int]
     local_psy_location_to_local_psy_item_id: Dict[int, int]
     local_psy_item_ids: Set[int]
+    slot_data: Dict[str, Any]
 
     def __init__(self, server_address, password):
         super(PsychonautsContext, self).__init__(server_address, password)
@@ -66,10 +70,19 @@ class PsychonautsContext(CommonContext):
         self.awaiting_bridge = False
         self.got_deathlink = False
         self.deathlink_status = False
-        self.psy_item_counts = {item_dictionary_table[item_name]: count for item_name, count in item_counts.items()}
-        self.psy_item_counts_received = {k: 0 for k in self.psy_item_counts.keys()}
+
+        # The maximum number of each item that Psychonauts can receive before it runs out of unique IDs for that item.
+        self.max_item_counts = {item_dictionary_table[item_name] + AP_ITEM_OFFSET: count
+                                for item_name, count in item_counts.items()}
+        # The number of times each item has been received from a non-local location.
+        self.non_local_received_item_counts = {item_id: 0 for item_id in self.max_item_counts.keys()}
+
         self.slot_data = {}
+
+        # These are read from slot data:
+        # Mapping from Psychonauts location ID to Psychonauts item ID for all locally placed items.
         self.local_psy_location_to_local_psy_item_id = {}
+        # Set of Psychonauts item IDs of locally placed items. These IDs cannot be used when receiving non-local items.
         self.local_psy_item_ids = set()
 
         options = Utils.get_settings()
@@ -107,12 +120,18 @@ class PsychonautsContext(CommonContext):
                 if "Items" not in file and "Deathlink" not in file:
                     os.remove(root+"/"+file)
 
+    def read_slot_data(self, args: dict):
+        # Slot data is set in `PSYWorld.fill_slot_data()`.
+        self.slot_data = args.get("slot_data", {})
+        local_location_to_psy_id = self.slot_data["local_location_to_psy_id"]
+        # When int keys are stored in slot data, they are converted to str, so convert back to int.
+        self.local_psy_location_to_local_psy_item_id = {int(k): v for k, v in local_location_to_psy_id.items()}
+        self.local_psy_item_ids = set(local_location_to_psy_id.values())
+
     def on_package(self, cmd: str, args: dict):
         if cmd in {"Connected"}:
-            self.slot_data = args.get("slot_data", {})
-            # When int keys are stored in slot data, they are converted to str, so convert back to int.
-            self.local_psy_location_to_local_psy_item_id = {int(k): v for k, v in self.slot_data["local_location_to_psy_id"].items()}
-            self.local_psy_item_ids = set(self.local_psy_location_to_local_psy_item_id.values())
+            self.read_slot_data(args)
+
             if not os.path.exists(self.game_communication_path):
                 os.makedirs(self.game_communication_path)
             # create ItemsCollected.txt if it doesn't exist yet
@@ -135,63 +154,70 @@ class PsychonautsContext(CommonContext):
             start_index = args["index"]
             if start_index != len(self.items_received):
                 for item in args['items']:
-                    # subtract base_id to get real value for game
                     network_item = NetworkItem(*item)
-                    converted_id = network_item.item - 42690000
+                    ap_item_id = network_item.item
+                    # Subtract the AP item offset to get the base item ID for Psychonauts.
+                    base_psy_item_id = ap_item_id - AP_ITEM_OFFSET
 
-                    # Total number of these items available to the game.
-                    item_count = self.psy_item_counts[converted_id]
+                    # The maximum number of times this item can be received by Psychonauts.
+                    max_item_count = self.max_item_counts[ap_item_id]
                     # Maximum Psychonauts ID for this item when there are multiple copies.
-                    max_converted_id = converted_id + item_count - 1
+                    max_psy_item_id = base_psy_item_id + max_item_count - 1
 
                     # Check if the item was placed locally.
                     if network_item.player == self.slot:
                         # Locally placed items must write the exact Psychonauts item ID they were placed as.
-                        converted_location_id = network_item.location - 42690000
-                        if converted_location_id not in self.local_psy_location_to_local_psy_item_id:
-                            print(f"Error: Could not find {converted_location_id} in"
-                                  f" {self.local_psy_location_to_local_psy_item_id}")
+                        # Writing locally placed items is required for sending local items via server cheat commands as
+                        # well as resuming an in-progress slot from a new save file without having to manually collect
+                        # the local items again.
+                        psy_location_id = network_item.location - AP_LOCATION_OFFSET
+                        if psy_location_id not in self.local_psy_location_to_local_psy_item_id:
+                            # This should not happen unless AP can send dummy local location IDs for locations that do
+                            # not exist.
+                            print(f"Error: Could not find location '{network_item.location}' (converted to"
+                                  f" '{psy_location_id}') in the known local location IDs:"
+                                  f" {self.local_psy_location_to_local_psy_item_id.keys()}")
                         else:
-                            # Get the Psychonauts item id for the item at this location
-                            local_item_psy_id = self.local_psy_location_to_local_psy_item_id[converted_location_id]
+                            # Get the Psychonauts item id for the item at this local location.
+                            local_item_psy_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
                             # Check that the Psychonauts ID matches the item AP thinks is at this location.
-                            if converted_id <= local_item_psy_id <= max_converted_id:
+                            if base_psy_item_id <= local_item_psy_id <= max_psy_item_id:
                                 with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
                                     f.write(f"{local_item_psy_id}\n")
                             else:
                                 # This should not happen unless the slot data does not match the multiworld data.
-                                print(f"Error: The local item AP thinks is at {converted_location_id} has base ID"
-                                      f" '{converted_id}' and max ID '{max_converted_id}', but the actual local item"
-                                      f" according to slot data has ID '{local_item_psy_id}'")
+                                print(f"Error: The local item that AP thinks is at '{psy_location_id}' has Psychonauts"
+                                      f" base ID '{base_psy_item_id}' and max ID '{max_psy_item_id}', but the actual"
+                                      f" local item according to slot data has Psychonauts ID '{local_item_psy_id}'")
 
                     else:
-                        # Total number of these items received by the game so far
-                        item_count_received = self.psy_item_counts_received[converted_id]
                         # For non-local received items, the Psychonauts ID is incremented for each copy of that received
                         # so far, so that each item received produces a unique Psychonauts ID.
-                        next_psy_id = converted_id + item_count_received
+                        # Count of this item received from other worlds so far.
+                        item_count_received = self.non_local_received_item_counts[ap_item_id]
+                        psy_item_id = base_psy_item_id + item_count_received
                         # Psychonauts has a limited number of IDs for each duplicate of an item, so check if it's
                         # possible to send more of this item.
-                        if next_psy_id in self.local_psy_item_ids or next_psy_id > max_converted_id:
+                        if psy_item_id in self.local_psy_item_ids or psy_item_id > max_psy_item_id:
                             # Locally placed Psychonauts items are placed starting from that item's maximum ID and
                             # decrementing the ID for each item placed, so reaching the Psychonauts ID of a locally
-                            # placed item means that all copies of this item have been received or placed locally.
+                            # placed item means that all available copies of this item have been received or placed
+                            # locally.
                             # When forcefully sending an item via server console cheat command, items are sent and
                             # collected from locations that exist first, so reaching the ID of a locally placed item
-                            # should only occur when all locations, including local locations, containing this item
-                            # have been exhausted.
+                            # should only occur when all locations, including local locations, have been exhausted.
                             #
                             # Alternatively, if there were no locally placed copies of the item, then Psychonauts will
                             # only have run out of IDs for the item once the maximum ID for that item has been reached.
-                            print(f"Warning: Cannot send item '{network_item.item}' with Psychonauts ID '{next_psy_id}'"
-                                  f" and base Psychonauts ID '{converted_id}' because Psychonauts has run out of that"
-                                  f"item.")
+                            print(f"Warning: Cannot receive AP item '{ap_item_id}' with incremented Psychonauts ID"
+                                  f" '{psy_item_id}' and base Psychonauts ID '{base_psy_item_id}' because Psychonauts"
+                                  f" has run out of unique IDs for that item. The maximum Psychonauts ID for this item,"
+                                  f" including locally placed items, is '{max_psy_item_id}'.")
                         else:
                             with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
-                                f.write(f"{next_psy_id}\n")
+                                f.write(f"{psy_item_id}\n")
                             # Increment the received count for this item.
-                            self.psy_item_counts_received[converted_id] = item_count_received + 1
-
+                            self.non_local_received_item_counts[ap_item_id] = item_count_received + 1
 
         if cmd in {"RoomUpdate"}:
 
@@ -265,7 +291,7 @@ async def game_watcher(ctx: PsychonautsContext):
                 # Keep track of already collected values
                 if value not in collected_table:
                     # add the base_id 42690000
-                    sending = sending+[(int(value + 42690000))]
+                    sending = sending+[(int(value + AP_LOCATION_OFFSET))]
                     collected_table.append(value)
             f.close()
 

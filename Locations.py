@@ -446,3 +446,6 @@ all_locations = {
     **MC_Checks,
     **event_locations,
 }
+
+# Offset added to Psychonauts IDs to produce AP IDs.
+AP_LOCATION_OFFSET = 42690000

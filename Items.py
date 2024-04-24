@@ -279,3 +279,6 @@ item_counts: Dict[str, int] = {**{k: 1 for k in item_dictionary_table}, **{
     ItemName.AHLarge: 5,
     ItemName.PsiCard: 107,
 }}
+
+# Offset added to Psychonauts IDs to produce AP IDs.
+AP_ITEM_OFFSET = 42690000
