@@ -184,14 +184,4 @@ class PSYWorld(World):
             if name in slot_data_options:
                 slot_data[name] = value
 
-        # `generate_output()` and `fill_slot_data()` can be run simultaneously, so, for now, `gen_psy_ids()` will be
-        # called by both methods (directly or by `gen_psy_seed()`) rather than reusing the returned list.
-        # To reuse the returned list, `fill_slot_data()` will need to wait for `generate_output()` to finish first.
-        # todo: If a LocationScouts request with all local location IDs can be sent to the server before processing any
-        #  locally received items, then the Client can figure out the Psychonauts IDs by counting backwards through the
-        #  sorted local locations.
-        location_to_psy_id = gen_psy_ids(self)
-        local_location_to_psy_id = {location_id: item_id for location_id, item_id in location_to_psy_id if item_id < PSY_NON_LOCAL_ID_START}
-        slot_data["local_location_to_psy_id"] = local_location_to_psy_id
-
         return slot_data

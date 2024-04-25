@@ -205,6 +205,9 @@ item_dictionary_table = {
     **OtherItems_Table,
 }
 
+# Reverse mapping of all items, from item ID to item name.
+reverse_item_dictionary_table = {v: k for k, v in item_dictionary_table.items()}
+
 progression_set = {
     **RequiredProps_Table,
     **MindUnlocks_Table,

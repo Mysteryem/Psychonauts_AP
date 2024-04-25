@@ -4,7 +4,7 @@ import yaml
 import os
 import Utils
 import zipfile
-from typing import List, Tuple
+from typing import List, Tuple, Iterable
 
 from.Names import ItemName
 from .Items import item_dictionary_table, item_counts
@@ -28,7 +28,11 @@ class PSYContainer(APContainer):
         super().write_contents(opened_zipfile)
 
 
-def gen_psy_ids(self) -> List[Tuple[int, int]]:
+def gen_psy_ids(location_tuples_in: Iterable[Tuple[bool, str, int]]) -> List[Tuple[int, int]]:
+    """
+    Generic Psychonauts ID generator. The input location tuples may come from scouted locations or from generated
+    locations.
+    """
     # append the item values, need to be in exact order
     # locations are handled by index in table
     # items from other games need to be converted to a new value
@@ -40,45 +44,49 @@ def gen_psy_ids(self) -> List[Tuple[int, int]]:
 
     placed_item_counts = {}
 
-    for location in self.multiworld.get_filled_locations(self.player):
-
-        location_id = all_locations[location.name]
-
-        if location.item:
-            if location.item.player == self.player:
-                item_name = location.item.name
-                # victory and filler location can have arbitrary number
-                if item_name == "Victory" or item_name == "Filler":
-                    itemcode = 999
-                else:
-                    # When there are multiple copies of an item, locally placed items start from the maximum id for that
-                    # item and count backwards for each item placed.
-                    # Conversely, as items with multiple copies are received from the multiworld, the received ids start
-                    # from the minimum id for that item and count upwards for each item received.
-                    base_item_code = item_dictionary_table[item_name]
-                    item_count = item_counts[item_name]
-                    count_placed = placed_item_counts.setdefault(base_item_code, 0)
-                    max_item_code = base_item_code + item_count - 1
-                    itemcode = max_item_code - count_placed
-                    assert itemcode >= base_item_code, "More '%s' items were placed locally than exist" % item_name
-                    placed_item_counts[base_item_code] = count_placed + 1
+    # Pre-sort the tuples based on location ID to ensure IDs are consistent even if the input is in a different order.
+    for is_local_item, local_item_name, location_id in sorted(location_tuples_in, key=lambda t: t[2]):
+        if is_local_item:
+            if local_item_name == "Victory" or local_item_name == "Filler":
+                # It is an event item, such as those used for Victory and Filler event locations.
+                itemcode = 999
             else:
-                # item from another game
-                itemcode = non_local_id
-                non_local_id += 1
+                # When there are multiple copies of an item, locally placed items start from the maximum id for that
+                # item and count backwards for each item placed.
+                # Conversely, as items with multiple copies are received from the multiworld, the received ids start
+                # from the minimum id for that item and count upwards for each item received.
+                base_item_code = item_dictionary_table[local_item_name]
+                item_count = item_counts[local_item_name]
+                count_placed = placed_item_counts.setdefault(base_item_code, 0)
+                max_item_code = base_item_code + item_count - 1
+                itemcode = max_item_code - count_placed
+                assert itemcode >= base_item_code, "More '%s' items were placed locally than exist" % local_item_name
+                placed_item_counts[base_item_code] = count_placed + 1
         else:
             # item from another game
             itemcode = non_local_id
             non_local_id += 1
 
-            # Append the location ID and item code tuple to the list
+        # Append the location ID and item code tuple to the list
 
         location_tuples.append((location_id, itemcode))
 
-    # Sort the list of tuples based on location ID
-    location_tuples.sort(key=lambda x: x[0])
-
     return location_tuples
+
+
+def gen_psy_ids_from_filled_locations(self) -> List[Tuple[int, int]]:
+    location_tuples = []
+
+    for location in self.multiworld.get_filled_locations(self.player):
+
+        location_id = all_locations[location.name]
+
+        is_local = location.item and location.item.player == self.player
+        item_name = location.item.name if is_local else None
+
+        location_tuples.append((is_local, item_name, location_id))
+
+    return gen_psy_ids(location_tuples)
 
 
 def gen_psy_seed(self, output_directory):
@@ -191,7 +199,7 @@ def gen_psy_seed(self, output_directory):
     '''
     randoseed_parts.append(default_seed_settings)
 
-    location_tuples = gen_psy_ids(self)
+    location_tuples = gen_psy_ids_from_filled_locations(self)
 
     # attach more lua code structure first
     formattedtext2 = '''
