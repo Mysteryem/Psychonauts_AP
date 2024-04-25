@@ -1,13 +1,9 @@
 from __future__ import annotations
 import os
-import queue
 import sys
 import asyncio
-import shutil
 import logging
 from typing import Dict, Any, Set, List
-from queue import SimpleQueue
-from threading import Lock
 
 import ModuleUpdate
 ModuleUpdate.update()
@@ -189,13 +185,14 @@ class PsychonautsContext(CommonContext):
             self.local_psy_item_ids = set(self.local_psy_location_to_local_psy_item_id.values())
 
             self.has_local_location_data = True
-            print("Scouted location location info has been received and processed")
+            print("Scouted location info has been received and processed. Received items can now be sent to"
+                  " Psychonauts.")
 
         return True
 
     def receive_item(self, network_item: NetworkItem):
         if not self.has_local_location_data:
-            raise RuntimeError("receive_item was called before local location data has been received and set")
+            raise RuntimeError("receive_item() was called before local location data has been received and processed")
 
         ap_item_id = network_item.item
         # Subtract the AP item offset to get the base item ID for Psychonauts.
@@ -286,7 +283,6 @@ class PsychonautsContext(CommonContext):
                 f.write(f"{psy_item_id}\n")
 
     def on_package(self, cmd: str, args: dict):
-        print(f"Received: '{cmd}'")
         if cmd in {"Connected"}:
             if not os.path.exists(self.game_communication_path):
                 os.makedirs(self.game_communication_path)

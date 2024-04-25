@@ -1,17 +1,14 @@
-import logging
-
-import yaml
 import os
 import Utils
 import zipfile
 from typing import List, Tuple, Iterable
 
-from.Names import ItemName
 from .Items import item_dictionary_table, item_counts
 from .Locations import all_locations
 from worlds.Files import APContainer
 
 PSY_NON_LOCAL_ID_START = 377
+
 
 class PSYContainer(APContainer):
     game: str = 'Psychonauts'
@@ -82,9 +79,9 @@ def gen_psy_ids_from_filled_locations(self) -> List[Tuple[int, int]]:
         location_id = all_locations[location.name]
 
         is_local = location.item and location.item.player == self.player
-        item_name = location.item.name if is_local else None
+        local_item_name = location.item.name if is_local else None
 
-        location_tuples.append((is_local, item_name, location_id))
+        location_tuples.append((is_local, local_item_name, location_id))
 
     return gen_psy_ids(location_tuples)
 

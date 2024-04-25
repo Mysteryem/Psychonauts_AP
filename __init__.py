@@ -183,5 +183,4 @@ class PSYWorld(World):
         for name, value in self.options.as_dict(*self.options_dataclass.type_hints).items():
             if name in slot_data_options:
                 slot_data[name] = value
-
         return slot_data
