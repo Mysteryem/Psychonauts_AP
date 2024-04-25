@@ -430,7 +430,7 @@ event_locations = {
     LocationName.OleanderBossEvent: 367,
 }
 
-all_locations = {
+all_fillable_locations = {
     **CA_Checks,
     **Rank_Checks,
     **AS_Checks,
@@ -444,6 +444,10 @@ all_locations = {
     **WW_Checks,
     **BV_Checks,
     **MC_Checks,
+}
+
+all_locations = {
+    **all_fillable_locations,
     **event_locations,
 }
 
@@ -451,4 +455,4 @@ all_locations = {
 AP_LOCATION_OFFSET = 42690000
 
 # The event locations cannot have regular items placed in them, so are not included.
-FILLABLE_LOCATION_COUNT = len(all_locations) - len(event_locations)
+FILLABLE_LOCATION_COUNT = len(all_fillable_locations)
