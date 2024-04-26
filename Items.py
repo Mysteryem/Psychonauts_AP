@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from .Names import ItemName
     
@@ -285,3 +285,19 @@ item_counts: Dict[str, int] = {**{k: 1 for k in item_dictionary_table}, **{
 
 # Offset added to Psychonauts IDs to produce AP IDs.
 AP_ITEM_OFFSET = 42690000
+
+_max_base_id = max(item_dictionary_table.values())
+# The maximum Psychonauts item ID, taking into account that there are multiple of some items.
+MAX_PSY_ITEM_ID = _max_base_id + item_counts[reverse_item_dictionary_table[_max_base_id]] - 1
+del _max_base_id
+
+
+def find_item_name_from_psy_id(psy_item_id: int) -> Union[str, None]:
+    if 0 < psy_item_id <= MAX_PSY_ITEM_ID:
+        # The Psychonauts item ID may have been incremented from its base ID to produce a unique ID, so iterate
+        # backwards until the first matching item is found.
+        for i in range(psy_item_id, 0, -1):
+            if i in reverse_item_dictionary_table:
+                return reverse_item_dictionary_table[i]
+    # No item with the ID exists.
+    return None

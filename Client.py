@@ -8,7 +8,13 @@ from typing import Dict, Any, Set, List
 import ModuleUpdate
 ModuleUpdate.update()
 import Utils
-from .Items import item_dictionary_table, item_counts, AP_ITEM_OFFSET, reverse_item_dictionary_table
+from .Items import (
+    item_dictionary_table,
+    item_counts,
+    AP_ITEM_OFFSET,
+    reverse_item_dictionary_table,
+    find_item_name_from_psy_id,
+)
 from .Locations import AP_LOCATION_OFFSET, all_fillable_locations
 from .PsychoSeed import gen_psy_ids, PSY_NON_LOCAL_ID_START
 
@@ -155,38 +161,35 @@ class PsychonautsContext(CommonContext):
                     os.remove(root+"/"+file)
 
     def set_up_local_psy_item_id_info(self):
-        if not self.has_local_location_data:
-            # Attempt to figure out the Psychonauts IDs for all locally placed items.
-            location_tuples = []
-            for psy_location_id in all_fillable_locations.values():
-                ap_location_id = psy_location_id + AP_LOCATION_OFFSET
-                scouted_network_item = self.locations_info.get(ap_location_id)
-                if scouted_network_item is None:
-                    print("Have not received scouted local location info")
-                    return False
-                is_local = scouted_network_item.player == self.slot
-                if is_local:
-                    item_name = reverse_item_dictionary_table[scouted_network_item.item - AP_ITEM_OFFSET]
-                else:
-                    item_name = None
-                location_tuples.append((is_local, item_name, psy_location_id))
+        # Attempt to figure out the Psychonauts IDs for all locally placed items.
+        location_tuples = []
+        for psy_location_id in all_fillable_locations.values():
+            ap_location_id = psy_location_id + AP_LOCATION_OFFSET
+            scouted_network_item = self.locations_info.get(ap_location_id)
+            if scouted_network_item is None:
+                # Some or all of the requested location info has not been received yet.
+                # Generally, this shouldn't happen because sending a LocationScouts request for all local locations
+                # is one of the first things the client does after connecting to a server.
+                return False
+            is_local = scouted_network_item.player == self.slot
+            if is_local:
+                item_name = reverse_item_dictionary_table[scouted_network_item.item - AP_ITEM_OFFSET]
+            else:
+                item_name = None
+            location_tuples.append((is_local, item_name, psy_location_id))
 
-            # All the information needed to figure out the Psychonaunts item IDs of locally placed items has been
-            # acquired.
+        # All the information needed to figure out the Psychonaunts item IDs of locally placed items has been
+        # acquired.
 
-            # Note that event item locations are not provided here and are not real locations that can be scouted. The
-            # event locations have no effect on the generated Psychonauts IDs of local items, so the event item
-            # locations can be omitted from the calculation.
-            psy_id_tuples = gen_psy_ids(location_tuples)
+        # Note that event item locations are not provided here and are not real locations that can be scouted. The
+        # event locations have no effect on the generated Psychonauts IDs of local items, so the event item
+        # locations can be omitted from the calculation.
+        psy_id_tuples = gen_psy_ids(location_tuples)
 
-            # Convert the list of tuples into a dict and filter out items from other worlds.
-            self.local_psy_location_to_local_psy_item_id = {location_id: item_id for location_id, item_id
-                                                            in psy_id_tuples if item_id < PSY_NON_LOCAL_ID_START}
-            self.local_psy_item_ids = set(self.local_psy_location_to_local_psy_item_id.values())
-
-            self.has_local_location_data = True
-            print("Scouted location info has been received and processed. Received items can now be sent to"
-                  " Psychonauts.")
+        # Convert the list of tuples into a dict and filter out items from other worlds.
+        self.local_psy_location_to_local_psy_item_id = {location_id: item_id for location_id, item_id
+                                                        in psy_id_tuples if item_id < PSY_NON_LOCAL_ID_START}
+        self.local_psy_item_ids = set(self.local_psy_location_to_local_psy_item_id.values())
 
         return True
 
@@ -213,9 +216,8 @@ class PsychonautsContext(CommonContext):
             if psy_location_id not in self.local_psy_location_to_local_psy_item_id:
                 # This should not happen unless AP can send dummy local location IDs for locations that do
                 # not exist.
-                print(f"Error: Could not find location '{network_item.location}' (converted to"
-                      f" '{psy_location_id}') in the known local location IDs:"
-                      f" {self.local_psy_location_to_local_psy_item_id.keys()}")
+                logger.error("Error: Local item received from non-existent local location '%s'",
+                             network_item.location)
             else:
                 # Get the Psychonauts item id for the item at this local location.
                 local_item_psy_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
@@ -227,14 +229,16 @@ class PsychonautsContext(CommonContext):
                 else:
                     # This should not happen unless the scouted location data is incorrect or the Psychonauts item IDs
                     # have been incorrectly calculated from the scouted location data.
-                    print(f"Error: The local item that AP thinks is at '{psy_location_id}' has Psychonauts"
-                          f" base ID '{base_psy_item_id}' and max ID '{max_psy_item_id}', but the local item according"
-                          f" to scouted location data has Psychonauts ID '{local_item_psy_id}'")
-
+                    ap_item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown {ap_item_id}")
+                    expected_item_name = find_item_name_from_psy_id(local_item_psy_id)
+                    if expected_item_name is None:
+                        expected_item_name = f"Unknown {local_item_psy_id + AP_ITEM_OFFSET}"
+                    logger.error("Error: Tried to receive item '%s' from local location '%i', but the item should be"
+                                 " '%s' according to scouted location info.",
+                                 ap_item_name, network_item.location, expected_item_name)
         else:
             psy_item_id = None
             if network_item.location == -1:
-                print(f"Info: Receiving item sent by cheat command: {network_item}")
                 # Item was sent by cheat command.
 
                 # Attempt to find a local copy that has yet to be collected and send that so that all non-local copies
@@ -269,10 +273,10 @@ class PsychonautsContext(CommonContext):
                     #
                     # Alternatively, if there were no locally placed copies of the item, then Psychonauts will
                     # only have run out of IDs for the item once the maximum ID for that item has been reached.
-                    print(f"Warning: Cannot receive AP item '{ap_item_id}' with incremented Psychonauts ID"
-                          f" '{psy_item_id}' and base Psychonauts ID '{base_psy_item_id}' because Psychonauts"
-                          f" has run out of unique IDs for that item. The maximum Psychonauts ID for this item,"
-                          f" when including locally placed items, is '{max_psy_item_id}'.")
+                    item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown item {ap_item_id}")
+                    logger.warning("Warning: Could not receive item '%s' because Psychonauts has run out of unique IDs"
+                                   " for non-local copies of that item. This should only happen when items have been"
+                                   " sent using server cheat commands.", item_name)
                     return
 
                 # Increment the received count for this item, so that the next received copy of this item uses the next
@@ -306,14 +310,15 @@ class PsychonautsContext(CommonContext):
             start_index = args["index"]
             if start_index != len(self.items_received):
                 if self.has_local_location_data:
-                    for item in args['items']:
-                        network_item = NetworkItem(*item)
-                        self.receive_item(network_item)
+                    receive_item = self.receive_item
                 else:
-                    print("Have not received scouted location info, so storing items to receive until later")
-                    for item in args['items']:
-                        network_item = NetworkItem(*item)
-                        self.pending_received_items.append(network_item)
+                    # Received items cannot be processed yet, so store them for later.
+                    # This typically happens when reconnecting to a server where some items have already been received
+                    # because the server will immediately send all items received so far.
+                    receive_item = self.pending_received_items.append
+                for item in args['items']:
+                    network_item = NetworkItem(*item)
+                    receive_item(network_item)
 
         if cmd in {"RoomUpdate"}:
 
@@ -329,9 +334,9 @@ class PsychonautsContext(CommonContext):
                 # location data.
                 # Try to set up the local item data and receive any pending received items.
                 if self.set_up_local_psy_item_id_info():
-                    print("We have received the scouted location info we were waiting for and have set up the local data")
+                    # Items can now be received.
+                    self.has_local_location_data = True
                     if self.pending_received_items:
-                        print("There were pending received items to process, so processing them now")
                         for network_item in self.pending_received_items:
                             self.receive_item(network_item)
                         self.pending_received_items.clear()
