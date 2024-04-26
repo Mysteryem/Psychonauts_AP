@@ -193,6 +193,90 @@ class PsychonautsContext(CommonContext):
 
         return True
 
+    def receive_local_item(self, ap_location_id, ap_item_id, base_psy_item_id, max_psy_item_id):
+        """
+        Receive an item from the local world.
+        """
+        # Locally placed items must write the exact Psychonauts item ID they were placed as.
+        # Writing locally placed items is required for resuming an in-progress slot from a new save file without having
+        # to manually collect the local items again.
+        psy_location_id = ap_location_id - AP_LOCATION_OFFSET
+        if psy_location_id not in self.local_psy_location_to_local_psy_item_id:
+            # This should not happen unless AP can send dummy local location IDs for locations that do not exist.
+            logger.error("Error: Local item received from non-existent local location '%s'", ap_location_id)
+            return
+
+        # Get the Psychonauts item id for the item at this local location.
+        local_item_psy_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
+        # Check that the Psychonauts ID matches the item AP thinks is at this location.
+        if base_psy_item_id <= local_item_psy_id <= max_psy_item_id:
+            # Tell Psychonauts it has received the item.
+            with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
+                f.write(f"{local_item_psy_id}\n")
+        else:
+            # This should not happen unless the scouted location data is incorrect or the Psychonauts item IDs have been
+            # incorrectly calculated from the scouted location data.
+            ap_item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown {ap_item_id}")
+            expected_item_name = find_item_name_from_psy_id(local_item_psy_id)
+            if expected_item_name is None:
+                expected_item_name = f"Unknown {local_item_psy_id + AP_ITEM_OFFSET}"
+            logger.error("Error: Tried to receive item '%s' from local location '%i', but the item should be '%s'"
+                         " according to scouted location info.", ap_item_name, ap_location_id, expected_item_name)
+
+    def receive_non_local_item(self, ap_location_id, ap_item_id, base_psy_item_id, max_psy_item_id):
+        """
+        Receive an item from another world.
+        """
+        psy_item_id = None
+        if ap_location_id == -1:
+            # The item was sent by a cheat command.
+
+            # Attempt to find a local copy that has yet to be collected and send that so that all non-local copies of
+            # the item can still be sent.
+            # The local copies of each item could be found and stored in advance instead of iterating here, but sending
+            # items through cheat commands shouldn't happen often.
+            for psy_location_id in self.local_psy_location_to_local_psy_item_id.keys():
+                ap_item_id_at_location = self.locations_info[psy_location_id + AP_LOCATION_OFFSET].item
+                if (ap_item_id_at_location == ap_item_id
+                        and ap_location_id not in self.checked_locations
+                        and psy_location_id not in self.cheated_local_psy_locations):
+                    psy_item_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
+                    # If multiple items from cheat commands are received at once, e.g. the cheat command is used
+                    # multiple times before the client has connected, then self.checked_locations won't be updated after
+                    # the first cheated item, so an extra set is used to keep track of cheated local locations
+                    # containing local items.
+                    self.cheated_local_psy_locations.add(psy_location_id)
+                    break
+
+        if psy_item_id is None:
+            # For non-local received items, the Psychonauts ID is incremented for each copy of that received so far, so
+            # that each item received produces a unique Psychonauts ID.
+
+            # Count of this item received from other worlds so far.
+            item_count_received = self.non_local_received_item_counts[ap_item_id]
+            psy_item_id = base_psy_item_id + item_count_received
+            # Psychonauts has a limited number of IDs for each duplicate of an item, so check if it's possible to
+            # receive more of this item.
+            if psy_item_id in self.local_psy_item_ids or psy_item_id > max_psy_item_id:
+                # Locally placed Psychonauts items are placed starting from that item's maximum ID and decrementing the
+                # ID for each item placed, so reaching the Psychonauts ID of a locally placed item means that all
+                # available copies of this item have been received or placed locally.
+                #
+                # Alternatively, if there were no locally placed copies of the item, then Psychonauts will only have run
+                # out of IDs for the item once the maximum ID for that item has been reached.
+                item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown item {ap_item_id}")
+                logger.warning("Warning: Could not receive item '%s' because Psychonauts has run out of unique IDs for"
+                               " non-local copies of that item. This should only happen when items have been sent using"
+                               " server cheat commands.", item_name)
+                return
+
+            # Increment the received count for this item, so that the next received copy of this item uses the next ID.
+            self.non_local_received_item_counts[ap_item_id] = item_count_received + 1
+
+        # Tell Psychonauts it has received the item.
+        with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
+            f.write(f"{psy_item_id}\n")
+
     def receive_item(self, network_item: NetworkItem):
         if not self.has_local_location_data:
             raise RuntimeError("receive_item() was called before local location data has been received and processed")
@@ -209,82 +293,9 @@ class PsychonautsContext(CommonContext):
 
         # Check if the item was placed locally.
         if network_item.player == self.slot:
-            # Locally placed items must write the exact Psychonauts item ID they were placed as.
-            # Writing locally placed items is required for resuming an in-progress slot from a new save file without
-            # having to manually collect the local items again.
-            psy_location_id = network_item.location - AP_LOCATION_OFFSET
-            if psy_location_id not in self.local_psy_location_to_local_psy_item_id:
-                # This should not happen unless AP can send dummy local location IDs for locations that do
-                # not exist.
-                logger.error("Error: Local item received from non-existent local location '%s'",
-                             network_item.location)
-            else:
-                # Get the Psychonauts item id for the item at this local location.
-                local_item_psy_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
-                # Check that the Psychonauts ID matches the item AP thinks is at this location.
-                if base_psy_item_id <= local_item_psy_id <= max_psy_item_id:
-                    # Tell Psychonauts it has received the item.
-                    with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
-                        f.write(f"{local_item_psy_id}\n")
-                else:
-                    # This should not happen unless the scouted location data is incorrect or the Psychonauts item IDs
-                    # have been incorrectly calculated from the scouted location data.
-                    ap_item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown {ap_item_id}")
-                    expected_item_name = find_item_name_from_psy_id(local_item_psy_id)
-                    if expected_item_name is None:
-                        expected_item_name = f"Unknown {local_item_psy_id + AP_ITEM_OFFSET}"
-                    logger.error("Error: Tried to receive item '%s' from local location '%i', but the item should be"
-                                 " '%s' according to scouted location info.",
-                                 ap_item_name, network_item.location, expected_item_name)
+            self.receive_local_item(network_item.location, ap_item_id, base_psy_item_id, max_psy_item_id)
         else:
-            psy_item_id = None
-            if network_item.location == -1:
-                # Item was sent by cheat command.
-
-                # Attempt to find a local copy that has yet to be collected and send that so that all non-local copies
-                # of the item can still be sent.
-                # The local copies of each item could be found and stored in advance instead of iterating, but sending
-                # items through cheat commands shouldn't happen often.
-                for psy_location_id in self.local_psy_location_to_local_psy_item_id.keys():
-                    ap_item_id_at_location = self.locations_info[psy_location_id + AP_LOCATION_OFFSET].item
-                    if (ap_item_id_at_location == network_item.item
-                            and network_item.location not in self.checked_locations
-                            and psy_location_id not in self.cheated_local_psy_locations):
-                        psy_item_id = self.local_psy_location_to_local_psy_item_id[psy_location_id]
-                        # If multiple items from cheat commands are received at once, e.g. the cheat command is used
-                        # multiple times before the client has connected, then self.checked_locations won't be updated
-                        # after the first cheated item, so an extra set is used to keep track of cheated local
-                        # locations containing local items.
-                        self.cheated_local_psy_locations.add(psy_location_id)
-                        break
-            if psy_item_id is None:
-                # For non-local received items, the Psychonauts ID is incremented for each copy of that received
-                # so far, so that each item received produces a unique Psychonauts ID.
-                # Count of this item received from other worlds so far.
-                item_count_received = self.non_local_received_item_counts[ap_item_id]
-                psy_item_id = base_psy_item_id + item_count_received
-                # Psychonauts has a limited number of IDs for each duplicate of an item, so check if it's
-                # possible to send more of this item.
-                if psy_item_id in self.local_psy_item_ids or psy_item_id > max_psy_item_id:
-                    # Locally placed Psychonauts items are placed starting from that item's maximum ID and
-                    # decrementing the ID for each item placed, so reaching the Psychonauts ID of a locally
-                    # placed item means that all available copies of this item have been received or placed
-                    # locally.
-                    #
-                    # Alternatively, if there were no locally placed copies of the item, then Psychonauts will
-                    # only have run out of IDs for the item once the maximum ID for that item has been reached.
-                    item_name = reverse_item_dictionary_table.get(base_psy_item_id, f"Unknown item {ap_item_id}")
-                    logger.warning("Warning: Could not receive item '%s' because Psychonauts has run out of unique IDs"
-                                   " for non-local copies of that item. This should only happen when items have been"
-                                   " sent using server cheat commands.", item_name)
-                    return
-
-                # Increment the received count for this item, so that the next received copy of this item uses the next
-                # ID.
-                self.non_local_received_item_counts[ap_item_id] = item_count_received + 1
-            # Tell Psychonauts it has received the item.
-            with open(os.path.join(self.game_communication_path, "ItemsReceived.txt"), 'a') as f:
-                f.write(f"{psy_item_id}\n")
+            self.receive_non_local_item(network_item.location, ap_item_id, base_psy_item_id, max_psy_item_id)
 
     def on_package(self, cmd: str, args: dict):
         if cmd in {"Connected"}:
