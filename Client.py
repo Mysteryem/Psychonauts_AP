@@ -160,7 +160,7 @@ class PsychonautsContext(CommonContext):
                 if "Items" not in file and "Deathlink" not in file:
                     os.remove(root+"/"+file)
 
-    def set_up_local_psy_item_id_info(self):
+    def calc_psy_ids_from_scouted_local_locations(self):
         # Attempt to figure out the Psychonauts IDs for all locally placed items.
         location_tuples = []
         for psy_location_id in all_fillable_locations.values():
@@ -171,12 +171,12 @@ class PsychonautsContext(CommonContext):
                 # Generally, this shouldn't happen because sending a LocationScouts request for all local locations
                 # is one of the first things the client does after connecting to a server.
                 return False
-            is_local = scouted_network_item.player == self.slot
-            if is_local:
+            is_local_item = scouted_network_item.player == self.slot
+            if is_local_item:
                 item_name = reverse_item_dictionary_table[scouted_network_item.item - AP_ITEM_OFFSET]
             else:
                 item_name = None
-            location_tuples.append((is_local, item_name, psy_location_id))
+            location_tuples.append((is_local_item, item_name, psy_location_id))
 
         # All the information needed to figure out the Psychonaunts item IDs of locally placed items has been
         # acquired.
@@ -344,7 +344,7 @@ class PsychonautsContext(CommonContext):
                 # It could be the response to the initial LocationScouts request that was sent out to get all local
                 # location data.
                 # Try to set up the local item data and receive any pending received items.
-                if self.set_up_local_psy_item_id_info():
+                if self.calc_psy_ids_from_scouted_local_locations():
                     # Items can now be received.
                     self.has_local_location_data = True
                     if self.pending_received_items:

@@ -1,7 +1,7 @@
 import os
 import Utils
 import zipfile
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, Union
 
 from .Items import item_dictionary_table, item_counts
 from .Locations import all_locations
@@ -25,7 +25,7 @@ class PSYContainer(APContainer):
         super().write_contents(opened_zipfile)
 
 
-def gen_psy_ids(location_tuples_in: Iterable[Tuple[bool, str, int]]) -> List[Tuple[int, int]]:
+def gen_psy_ids(location_tuples_in: Iterable[Tuple[bool, Union[str, None], int]]) -> List[Tuple[int, int]]:
     """
     Generic Psychonauts ID generator. The input location tuples may come from scouted locations or from generated
     locations.
@@ -41,7 +41,8 @@ def gen_psy_ids(location_tuples_in: Iterable[Tuple[bool, str, int]]) -> List[Tup
 
     placed_item_counts = {}
 
-    # Pre-sort the tuples based on location ID to ensure IDs are consistent even if the input is in a different order.
+    # Pre-sort the tuples based on location ID to ensure the generated IDs are consistent even if the input is in a
+    # different order.
     for is_local_item, local_item_name, location_id in sorted(location_tuples_in, key=lambda t: t[2]):
         if is_local_item:
             if local_item_name == "Victory" or local_item_name == "Filler":
@@ -54,10 +55,12 @@ def gen_psy_ids(location_tuples_in: Iterable[Tuple[bool, str, int]]) -> List[Tup
                 # from the minimum id for that item and count upwards for each item received.
                 base_item_code = item_dictionary_table[local_item_name]
                 item_count = item_counts[local_item_name]
-                count_placed = placed_item_counts.setdefault(base_item_code, 0)
                 max_item_code = base_item_code + item_count - 1
+                count_placed = placed_item_counts.setdefault(base_item_code, 0)
+
                 itemcode = max_item_code - count_placed
                 assert itemcode >= base_item_code, "More '%s' items were placed locally than exist" % local_item_name
+
                 placed_item_counts[base_item_code] = count_placed + 1
         else:
             # item from another game
