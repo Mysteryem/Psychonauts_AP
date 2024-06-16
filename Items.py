@@ -2,6 +2,7 @@ from typing import Dict, List
 
 from .Names import ItemName
 from .PsychoRandoItems import PSYCHORANDO_ITEM_TABLE
+from .ItemUtils import concat_unique_dicts
 
 # Offset added to Psychonauts IDs to produce AP IDs.
 AP_ITEM_OFFSET = 42690000
@@ -135,17 +136,17 @@ OtherItems_Table = {
     ItemName.PropWaterCan: 92,
 }
 
-item_dictionary_table = {
-    **Props_Table,
-    **MindUnlocks_Table,
-    **PsiPowers_Table,
-    **BrainJar_Table,
-    **ScavHunt_Table,
-    **BaggageTags_Table,
-    **Baggage_Table,
-    **General_Table,
-    **OtherItems_Table,
-}
+item_dictionary_table = concat_unique_dicts(
+    Props_Table,
+    MindUnlocks_Table,
+    PsiPowers_Table,
+    BrainJar_Table,
+    ScavHunt_Table,
+    BaggageTags_Table,
+    Baggage_Table,
+    General_Table,
+    OtherItems_Table,
+)
 # Assert that there are no gaps in the item IDs
 assert max(item_dictionary_table.values()) == len(item_dictionary_table), "There should not be gaps in the AP item IDs"
 

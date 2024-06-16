@@ -1,4 +1,5 @@
 from .Names import LocationName
+from .ItemUtils import concat_unique_dicts
 
 # eventid matches Randomizer Seed index in table
 CA_Checks = {
@@ -499,12 +500,12 @@ CABH_Deep_Arrowhead_Checks = {
     LocationName.DeepAHRightOfEntrance: 551,
 }
 
-deep_arrowhead_locations = {
-    **CAGP_Deep_Arrowhead_Checks,
-    **CAMA_Deep_Arrowhead_Checks,
-    **CARE_Deep_Arrowhead_Checks,
-    **CABH_Deep_Arrowhead_Checks,
-}
+deep_arrowhead_locations = concat_unique_dicts(
+    CAGP_Deep_Arrowhead_Checks,
+    CAMA_Deep_Arrowhead_Checks,
+    CARE_Deep_Arrowhead_Checks,
+    CABH_Deep_Arrowhead_Checks,
+)
 
 # Mental Cobweb locations.
 # These are not included in PsychoRando seed generation so the IDs must be greater than all locations which are included
@@ -595,42 +596,42 @@ MC_Cobweb_Checks = {
     LocationName.CobwebEntranceHall2: 605,
 }
 
-mental_cobweb_locations = {
-    **BB_Cobweb_Checks,
-    **SA_Cobweb_Checks,
-    **MI_Cobweb_Checks,
-    **BT_Cobweb_Checks,
-    **LO_Cobweb_Checks,
-    **MM_Cobweb_Checks,
-    **TH_Cobweb_Checks,
-    **WW_Cobweb_Checks,
-    **BV_Cobweb_Checks,
-    **MC_Cobweb_Checks,
-}
+mental_cobweb_locations = concat_unique_dicts(
+    BB_Cobweb_Checks,
+    SA_Cobweb_Checks,
+    MI_Cobweb_Checks,
+    BT_Cobweb_Checks,
+    LO_Cobweb_Checks,
+    MM_Cobweb_Checks,
+    TH_Cobweb_Checks,
+    WW_Cobweb_Checks,
+    BV_Cobweb_Checks,
+    MC_Cobweb_Checks,
+)
 
 # Includes locations that may not be enabled.
-all_fillable_locations = {
-    **CA_Checks,
-    **Rank_Checks,
-    **AS_Checks,
-    **BB_Checks,
-    **SA_Checks,
-    **MI_Checks,
-    **NI_Checks,
-    **LO_Checks,
-    **MM_Checks,
-    **TH_Checks,
-    **WW_Checks,
-    **BV_Checks,
-    **MC_Checks,
-    **deep_arrowhead_locations,
-    **mental_cobweb_locations
-}
+all_fillable_locations = concat_unique_dicts(
+    CA_Checks,
+    Rank_Checks,
+    AS_Checks,
+    BB_Checks,
+    SA_Checks,
+    MI_Checks,
+    NI_Checks,
+    LO_Checks,
+    MM_Checks,
+    TH_Checks,
+    WW_Checks,
+    BV_Checks,
+    MC_Checks,
+    deep_arrowhead_locations,
+    mental_cobweb_locations
+)
 
-all_locations = {
-    **all_fillable_locations,
-    **event_locations,
-}
+all_locations = concat_unique_dicts(
+    all_fillable_locations,
+    event_locations,
+)
 
 # Locations which do not place items into the game world. When such a location contains a local item, the AP server will
 # tell the client to receive the item and the client will send the item to Psychonauts as if the item was non-locally
